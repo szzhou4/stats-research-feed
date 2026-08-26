@@ -7,7 +7,8 @@
  * baking a contact address into client-side requests; the app instead
  * relies on OpenAlex's generous no-key rate limits (documented as ~100k
  * requests/day, ~10/second) and keeps its own request volume small via
- * batching and caching (see `sources.ts`, `works.ts`, `cache.ts`).
+ * batching and per-journal caching (see `sources.ts`, `works.ts`, `feed.ts`)
+ * plus in-flight request de-duplication (below).
  */
 
 const OPENALEX_BASE_URL = "https://api.openalex.org";
@@ -17,6 +18,21 @@ export type OpenAlexResult<T> =
   | { ok: true; data: T }
   | { ok: false; error: string };
 
+// In-flight request de-duplication: if two callers ask for the exact same
+// URL (same path + params) while a request is already in flight, they share
+// one network call instead of issuing two. Keyed by the fully-built URL, so
+// it's automatically request-shape-aware (different filters/cursors are
+// different keys). Cleared as soon as the request settles — this is only
+// about coalescing concurrent duplicates, not a result cache (that's
+// sources.ts / feed.ts's job, with real TTLs).
+const inFlightRequests = new Map<string, Promise<OpenAlexResult<unknown>>>();
+
+/** Dev-only request logging. Gated off in production; kept intentionally (not stripped) as lightweight observability for future debugging of request volume. */
+function logRequest(url: URL): void {
+  if (process.env.NODE_ENV === "production") return;
+  console.info(`[OpenAlex] GET ${url.pathname}${url.search}`);
+}
+
 export async function openAlexGet<T>(
   path: string,
   params: Record<string, string>,
@@ -25,6 +41,19 @@ export async function openAlexGet<T>(
   for (const [key, value] of Object.entries(params)) {
     url.searchParams.set(key, value);
   }
+  const key = url.toString();
+
+  const existing = inFlightRequests.get(key);
+  if (existing) return existing as Promise<OpenAlexResult<T>>;
+
+  const requestPromise = performRequest<T>(url);
+  inFlightRequests.set(key, requestPromise as Promise<OpenAlexResult<unknown>>);
+  requestPromise.finally(() => inFlightRequests.delete(key));
+  return requestPromise;
+}
+
+async function performRequest<T>(url: URL): Promise<OpenAlexResult<T>> {
+  logRequest(url);
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -78,6 +107,21 @@ export interface OpenAlexWorkRecord {
   primary_location?: OpenAlexLocation | null;
   open_access?: { is_oa?: boolean | null } | null;
   abstract_inverted_index?: Record<string, number[]> | null;
+  /**
+   * OpenAlex's canonical work type (post the July 2026 type-classification
+   * overhaul): "article", "review", "erratum", "retraction", "preprint",
+   * "editorial", "letter", "paratext", etc. Requested and checked defensively
+   * (see normalize.ts) even though the API request itself already filters on
+   * it, in case a record is missing the field or the upstream filter ever
+   * misbehaves.
+   */
+  type?: string | null;
+  /**
+   * True if OpenAlex's Retraction Watch-backed data says this work has been
+   * retracted. Distinct from type:"retraction", which is the retraction
+   * *notice* document itself, not the retracted original work.
+   */
+  is_retracted?: boolean | null;
 }
 
 export interface OpenAlexListResponse<T> {

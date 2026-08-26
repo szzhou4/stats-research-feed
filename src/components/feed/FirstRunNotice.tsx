@@ -15,9 +15,10 @@ export function FirstRunNotice({ onDismiss }: FirstRunNoticeProps) {
       <div className="flex-1 space-y-1">
         <p>
           Welcome to your research feed. A few things worth knowing: you can customize which
-          journals appear using <span className="font-medium">Manage journals</span>; which
-          articles you&apos;ve seen is tracked automatically and stored only in this browser; and
-          the feed remembers where you left off when you come back.
+          journals appear using <span className="font-medium">Manage journals</span>; use{" "}
+          <span className="font-medium">Mark as seen</span> on any article to track your own
+          reading, stored only in this browser; and the feed points you back to the first article
+          you haven&apos;t marked seen when you come back.
         </p>
       </div>
       <Button

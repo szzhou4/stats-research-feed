@@ -4,14 +4,13 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Article, FeedDataStatus, FeedFilterState } from "@/lib/types";
 import { JOURNAL_CATALOG } from "@/lib/journals/catalog";
 import { getFeedArticles } from "@/lib/openalex/feed";
+import { getContinueState } from "@/lib/feed/continueTarget";
 import { parseDateMs, recencyBucket, RECENCY_BUCKET_LABELS, type RecencyBucket } from "@/lib/utils/date";
 import { useWatchlist } from "@/hooks/useWatchlist";
 import { useSeenState } from "@/hooks/useSeenState";
 import { useBookmarks } from "@/hooks/useBookmarks";
 import { useVisitTracking } from "@/hooks/useVisitTracking";
 import { useFirstRunNotice } from "@/hooks/useFirstRunNotice";
-import { useContinueReading } from "@/hooks/useContinueReading";
-import { useArticleVisibilityTracker } from "@/hooks/useArticleVisibilityTracker";
 import { useHasMounted } from "@/hooks/useHasMounted";
 
 import { FirstRunNotice } from "./FirstRunNotice";
@@ -42,7 +41,6 @@ export function FeedPage() {
   const bookmarks = useBookmarks();
   const visit = useVisitTracking();
   const firstRun = useFirstRunNotice();
-  const continueReading = useContinueReading();
 
   const hasMounted = useHasMounted();
   const allReady = hasMounted && visit.hydrated;
@@ -82,6 +80,18 @@ export function FeedPage() {
       cancelled = true;
     };
   }, [allReady, watchlist.followedJournals, reloadToken]);
+
+  // If the journal currently selected in the per-journal display filter gets
+  // unfollowed, its option disappears from the dropdown — reset to "all"
+  // rather than silently filtering everything out via a now-orphaned id.
+  useEffect(() => {
+    if (journalFilter !== "all" && !watchlist.followedJournalIds.has(journalFilter)) {
+      // Resetting a now-orphaned filter selection back to "all" in response to
+      // an external change (the watchlist) — same pattern as the fetch effect above.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setJournalFilter("all");
+    }
+  }, [journalFilter, watchlist.followedJournalIds]);
 
   const isNewArticle = useCallback(
     (article: Article) => {
@@ -155,15 +165,14 @@ export function FeedPage() {
     setJournalFilter("all");
   }, []);
 
-  const { registerCard } = useArticleVisibilityTracker({
-    onDwellSeen: seenState.markSeen,
-    onPositionUpdate: continueReading.savePosition,
-    isAlreadySeen: (id) => seenState.seenArticleIds.has(id),
-  });
-
-  const continueTargetArticle = continueReading.position
-    ? articles.find((a) => a.id === continueReading.position!.articleId)
-    : undefined;
+  // Derived, not persisted — see Issue 3 in the Zhou remediation. Recomputes
+  // from the full (unfiltered) article set for the current watchlist plus
+  // the manually-maintained seen set, so it can never go stale and never
+  // depends on scroll position, hover, or viewport.
+  const continueState = useMemo(
+    () => getContinueState(articles, seenState.seenArticleIds),
+    [articles, seenState.seenArticleIds],
+  );
 
   // Retries once `groupedEntries` changes (e.g. after clearFilters() re-renders
   // the list), since the target element may not exist in the DOM yet on the
@@ -188,11 +197,13 @@ export function FeedPage() {
   }, [pendingScrollId, groupedEntries]);
 
   const handleContinue = useCallback(() => {
-    if (!continueReading.position) return;
-    const targetId = continueReading.position.articleId;
+    if (continueState.kind !== "target") return;
+    // The target may be hidden by an active search/seen-filter/OA/journal
+    // filter — clear them first so it's guaranteed to be in the DOM to
+    // scroll to.
     clearFilters();
-    setPendingScrollId(targetId);
-  }, [continueReading.position, clearFilters]);
+    setPendingScrollId(continueState.article.id);
+  }, [continueState, clearFilters]);
 
   const showLoading = !allReady || feedStatus === "loading";
 
@@ -210,13 +221,7 @@ export function FeedPage() {
 
         {feedStatus === "demo" && <DemoModeBanner unresolvedJournalCount={unresolvedJournalIds.length} />}
 
-        {continueReading.position && continueTargetArticle && (
-          <ContinueBanner
-            articleTitle={continueTargetArticle.title}
-            updatedAt={continueReading.position.updatedAt}
-            onContinue={handleContinue}
-          />
-        )}
+        {continueState.kind !== "hidden" && <ContinueBanner state={continueState} onContinue={handleContinue} />}
 
         <FeedStatusBar
           totalShown={filteredSorted.length}
@@ -267,7 +272,6 @@ export function FeedPage() {
                       isBookmarked={bookmarks.bookmarkedArticleIds.has(article.id)}
                       onToggleSeen={() => seenState.toggleSeen(article.id)}
                       onToggleBookmark={() => bookmarks.toggleBookmark(article.id)}
-                      registerRef={registerCard(article.id)}
                       isContinueTarget={highlightedArticleId === article.id}
                     />
                   ))}

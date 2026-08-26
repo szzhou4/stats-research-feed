@@ -6,8 +6,6 @@ export const STORAGE_KEYS = {
   previousVisitAt: "stats-feed:previous-visit-at",
   /** Timestamp (ms) of the most recent activity seen, used to detect when a new session has begun. */
   lastActivityAt: "stats-feed:last-activity-at",
-  /** Where the user was last reading, for "continue where you left off". */
-  continueReadingPosition: "stats-feed:continue-reading-position",
   firstRunNoticeDismissed: "stats-feed:first-run-dismissed",
   bookmarkedArticleIds: "stats-feed:bookmarked-article-ids",
   openAlexSourceCache: "stats-feed:openalex-source-cache",

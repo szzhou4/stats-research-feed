@@ -1,14 +1,26 @@
-import { ArrowRight, History } from "lucide-react";
+import { ArrowRight, History, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { formatRelativeTime } from "@/lib/utils/date";
+import type { ContinueState } from "@/lib/feed/continueTarget";
 
 interface ContinueBannerProps {
-  articleTitle: string;
-  updatedAt: number;
+  /** Only "target" or "caught-up" — the parent doesn't render this component at all for "hidden". */
+  state: Extract<ContinueState, { kind: "target" | "caught-up" }>;
   onContinue: () => void;
 }
 
-export function ContinueBanner({ articleTitle, updatedAt, onContinue }: ContinueBannerProps) {
+export function ContinueBanner({ state, onContinue }: ContinueBannerProps) {
+  if (state.kind === "caught-up") {
+    return (
+      <div className="flex items-center gap-3 rounded-lg border border-border bg-card px-4 py-3">
+        <CheckCircle2 className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+        <p className="text-sm text-foreground">
+          <span className="font-medium">You&apos;re all caught up.</span>{" "}
+          <span className="text-muted-foreground">Every article in your feed is marked seen.</span>
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card px-4 py-3">
       <div className="flex items-start gap-3">
@@ -16,7 +28,7 @@ export function ContinueBanner({ articleTitle, updatedAt, onContinue }: Continue
         <div className="text-sm">
           <p className="font-medium text-foreground">Continue where you left off</p>
           <p className="mt-0.5 text-muted-foreground">
-            {formatRelativeTime(updatedAt)} · <span className="italic">{articleTitle}</span>
+            First unseen article · <span className="italic">{state.article.title}</span>
           </p>
         </div>
       </div>
