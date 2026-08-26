@@ -15,7 +15,6 @@ interface ArticleCardProps {
   isBookmarked: boolean;
   onToggleSeen: () => void;
   onToggleBookmark: () => void;
-  registerRef: (node: HTMLDivElement | null) => (() => void) | void;
   isContinueTarget?: boolean;
 }
 
@@ -32,14 +31,12 @@ export function ArticleCard({
   isBookmarked,
   onToggleSeen,
   onToggleBookmark,
-  registerRef,
   isContinueTarget = false,
 }: ArticleCardProps) {
   const [expanded, setExpanded] = useState(false);
 
   return (
     <article
-      ref={registerRef}
       id={`article-${article.id}`}
       className={cn(
         "rounded-lg border border-border bg-card p-4 transition-colors",

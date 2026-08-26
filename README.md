@@ -56,12 +56,14 @@ choices are saved in your browser and immediately reshape the feed.
 
 ### Seen / unseen tracking
 
-An article is marked "seen" only after it has spent real time meaningfully
-visible in your browser viewport (using an `IntersectionObserver` with a
-short dwell timer) — never just because it was fetched or rendered
-off-screen. You can also mark any article seen/unseen manually. Seen
-articles stay fully readable but visually recede a little (lighter weight,
-no unread accent stripe) so unseen articles stand out.
+Seen/unseen state is **entirely manual and deterministic** — click
+**Mark as seen** on any article, and click it again to mark it unseen.
+Nothing is ever marked seen automatically by scrolling, hovering, or simply
+being rendered on screen; an earlier version experimented with automatic
+viewport-dwell detection and it was inconsistent in practice, so it was
+removed in favor of an explicit, predictable control. Seen articles stay
+fully readable but visually recede a little (lighter weight, no unread
+accent stripe) so unseen articles stand out.
 
 ### "New since your last visit"
 
@@ -75,10 +77,16 @@ very first-ever visit never misleadingly claims the whole 90-day feed is
 
 ### Continue where you left off
 
-As you scroll, the app keeps track of whichever article currently occupies
-the most of your viewport and saves its stable ID (not a fragile scroll
-pixel offset). A banner at the top of the feed lets you jump straight back
-to it, even after closing the tab and coming back days later.
+The rule is simple and fully deterministic: **Continue** always points to the
+*first unseen article, newest-first, across your currently followed
+journals*. It's recomputed on every render from your current article set and
+seen-state — never persisted, never based on scroll position, viewport
+occupancy, or hover — so it can't go stale and always reflects manual
+seen/unseen changes immediately, including after a refresh. If you haven't
+marked anything seen yet, the banner doesn't show (there's nothing to
+resume). If everything is seen, it shows a "you're all caught up" state
+instead. Clicking Continue clears any active search/filter so the target is
+always reachable, and scrolls straight to it.
 
 ---
 
@@ -94,11 +102,11 @@ src/
                            FeedStatusBar, empty/loading/error states, …)
     journals/              Journal watchlist management dialog
   hooks/                  React hooks: watchlist, seen state, bookmarks,
-                           visit tracking, first-run notice, continue-reading
-                           position, and the IntersectionObserver-based
-                           visibility tracker
+                           visit tracking, first-run notice
   lib/
     journals/catalog.ts   The static journal catalog (name + ISSNs)
+    feed/continueTarget.ts Pure function deriving the "Continue where you
+                           left off" target from articles + seen state
     openalex/              OpenAlex data-access layer (client, source
                            resolution, work fetching, normalization, demo
                            fallback data) — the ONLY place that talks to
@@ -132,22 +140,49 @@ data-fetching and persistence logic centralized, testable, and swappable.
 requires **no API key**. The data-access layer (`src/lib/openalex/`) does
 the following, without ever hand-typing a guessed OpenAlex ID:
 
-1. **Resolve journals → OpenAlex Source IDs by ISSN.** Every journal in the
-   catalog carries its print/online ISSNs (cross-checked against the ISSN
-   International Centre portal, publisher pages, and Wikipedia). All of a
-   watchlist's ISSNs are sent in a single batched
-   `GET /sources?filter=issn:a|b|c|...` request — never one request per
-   journal, and never a fuzzy title match. The result is cached in
-   `localStorage` for 24 hours.
-2. **Fetch recent works by source, batched.** Resolved Source IDs are
-   OR'd into `GET /works?filter=primary_location.source.id:S1|S2|...,
-   from_publication_date:<90 days ago>`, paginated via OpenAlex's cursor
-   API, capped at a sane number of pages, and cached for 20 minutes.
-3. **Normalize** every OpenAlex work into a consistent internal `Article`
+1. **Resolve journals → OpenAlex Source IDs by ISSN, cached per journal.**
+   Every journal in the catalog carries its print/online ISSNs (cross-checked
+   against the ISSN International Centre portal, publisher pages, and
+   Wikipedia). Each journal's resolved Source ID (or confirmed
+   "unresolvable") is cached independently in `localStorage` for 24 hours
+   (`src/lib/openalex/sources.ts`). Only journals whose cached resolution is
+   missing or stale are looked up — and those are still batched into as few
+   `GET /sources?filter=issn:a|b|c|...` requests as possible (never one
+   request per journal), never a fuzzy title match.
+2. **Fetch recent works by source, cached per journal.** Each journal's
+   recent works are cached independently for 20 minutes
+   (`src/lib/openalex/feed.ts`). Only journals whose cache is missing or
+   stale get fetched, and — same principle — every stale/missing journal in
+   one load is OR'd together into as few
+   `GET /works?filter=primary_location.source.id:S1|S2|...,
+   from_publication_date:<90 days ago>,type:article|review,is_retracted:false`
+   requests as possible, paginated via OpenAlex's cursor API and capped at a
+   sane number of pages per batch. Because each journal's data is cached
+   independently, **toggling a journal in the watchlist is a purely local
+   operation** — unfollowing never triggers a network call, and re-following
+   a journal whose data is still fresh is instant. Only genuinely new or
+   stale journals ever hit the network, and identical concurrent requests
+   (same URL in flight at the same time) are de-duplicated in
+   `src/lib/openalex/client.ts`.
+3. **Filter to genuine scholarly content.** The `type:article|review,
+   is_retracted:false` filter (verified against OpenAlex's current API docs,
+   including its July 2026 type-classification overhaul) excludes errata,
+   corrections, editorials, letters, and retracted works server-side, while
+   keeping legitimate review articles. `normalize.ts` re-checks the same
+   condition defensively in case a record is missing the field or a future
+   code path queries OpenAlex without the filter.
+4. **Normalize** every OpenAlex work into a consistent internal `Article`
    shape — reconstructing the abstract from OpenAlex's inverted-index
    format, extracting a safe DOI/article URL, and gracefully defaulting
-   missing authors/dates/OA status/abstracts instead of erroring.
-4. **De-duplicate** by work ID and then by DOI.
+   missing authors/dates/OA status/abstracts instead of erroring. Only these
+   normalized fields are cached — never raw OpenAlex response payloads — to
+   keep the `localStorage` footprint compact.
+5. **De-duplicate** by work ID and then by DOI.
+
+All UI-level filtering and sorting — text search, seen/unseen, Open Access,
+sort order, expanding an abstract, marking an article seen — operates
+entirely on the already-fetched, already-cached article set in memory and
+never triggers a new OpenAlex request.
 
 If OpenAlex can't be reached, or a specific journal's source can't be
 resolved, the app **never fabricates data or fakes a live result**. Instead
@@ -155,6 +190,20 @@ it falls back to a small, clearly-labeled demo dataset (every title is
 prefixed "Demo Article:", carries a "Demo data" badge, and a banner explains
 what happened) so the app still renders something useful. Any journal that
 couldn't be resolved is flagged directly in the "Manage journals" dialog.
+
+### Caching model at a glance
+
+| What | Where | Granularity | TTL |
+|---|---|---|---|
+| Journal → OpenAlex Source ID | `localStorage` (`stats-feed:openalex-source-cache`) | per journal | 24h |
+| Recent works per journal | `localStorage` (`stats-feed:openalex-works-cache`) | per journal | 20min |
+| In-flight duplicate requests | in-memory (per browser tab) | per exact URL | until settled |
+
+Everything is per-browser, client-side `localStorage` — there's no server, so
+nothing is shared across users or devices, and a hard refresh just re-reads
+the same cache (no data loss). This is intentionally simple for a research
+prototype; a future version with a backend could add a shared server-side
+cache, but that's out of scope here.
 
 ## Running it locally
 
@@ -176,14 +225,19 @@ npm run start   # run the production build locally
 npm run lint    # ESLint
 ```
 
-> **Note on this development environment:** the sandbox this app was built
-> in blocks outbound network access to `api.openalex.org` at the network
-> policy level, so live OpenAlex retrieval could not be exercised end-to-end
-> during this build session — the app was verified instead in its automatic
-> demo-data fallback mode (see "Current limitations" below). The OpenAlex
-> integration code itself is complete and follows OpenAlex's documented,
-> no-key REST API; it should fetch real results as soon as it runs
-> somewhere with normal internet access (your own machine, Vercel, etc.).
+> **Note on this development environment:** the sandbox this app was
+> originally built in, and the sandbox the Aug 2026 Zhou-feedback
+> remediation pass was implemented in, both block outbound network access
+> (the V1 sandbox to `api.openalex.org` specifically; the remediation
+> sandbox blocked essentially all direct package-registry/API egress, which
+> also meant `npm install` itself could not complete there). Live OpenAlex
+> retrieval and a running `npm run dev`/`npm run build` were not exercised
+> end-to-end in either session — verify both once this runs somewhere with
+> normal internet access (your own machine, Vercel, etc.). The OpenAlex
+> integration code follows OpenAlex's documented, no-key REST API and was
+> checked against OpenAlex's live documentation (not just training memory)
+> during the remediation pass — see the PR description for exactly what was
+> and wasn't verified.
 
 ## How local persistence works
 
@@ -193,13 +247,18 @@ device. See `src/lib/storage/localStorageAdapter.ts` and
 `src/lib/storage/keys.ts` for the full list of keys. In short, it persists:
 
 - Your followed journal IDs
-- Which article IDs you've marked seen
+- Which article IDs you've marked seen (manually — see "Seen / unseen
+  tracking" above)
 - Your previous-visit timestamp (used for "new since last visit")
-- Your current reading position (used for "continue where you left off")
 - Bookmarked article IDs
 - Whether you've dismissed the first-run notice
-- Short-lived caches of OpenAlex responses (to avoid refetching on every
-  reload)
+- Per-journal caches of OpenAlex source-ID resolutions and recent works (to
+  avoid refetching data that's already fresh — see "Caching model at a
+  glance" above)
+
+"Continue where you left off" is **not** persisted — it's recomputed on every
+render from your current articles and seen-state (see "Continue where you
+left off" above), so there's nothing to list here for it.
 
 All reads/writes go through one small adapter (`storage.get/set/remove`),
 and every hook that owns a piece of state (`useWatchlist`, `useSeenState`,
@@ -220,18 +279,21 @@ wouldn't need to change. The pieces that would still need real work:
 - Deciding a sync strategy for state that currently assumes "one browser,
   one user" (e.g. merging seen-state across devices)
 
-## Current V1 limitations
+## Current limitations
 
 - **No accounts / no cross-device sync.** State lives in one browser. Clear
   your browser data (or switch browsers/devices) and it's gone.
-- **Live OpenAlex retrieval was not exercised end-to-end in this build
-  session** because outbound requests to `api.openalex.org` were blocked by
-  this sandbox's network policy (confirmed directly — the request fails at
-  the proxy layer, not from the OpenAlex API itself). The integration code
-  is complete and built against OpenAlex's documented, no-key REST API; it
-  needs to be exercised once against a live network connection (e.g. `npm
-  run dev` on your own machine, or a Vercel deployment) to confirm the exact
-  shape of live responses matches expectations everywhere.
+- **Live OpenAlex retrieval, `npm install`, and a running dev/build server
+  were not exercised end-to-end during the Aug 2026 remediation pass**
+  because this sandbox blocked essentially all outbound package-registry and
+  API traffic (confirmed directly — every single package fetch in an
+  `npm install` run failed the same way, not just one flagged package). The
+  code was implemented and manually reviewed with care, and the OpenAlex
+  filter/field usage was checked against OpenAlex's live documentation, but
+  `npm run build`/`lint`/`dev` and live-browser verification of the five
+  Prof. Zhou scenarios still need to be run once in an environment with
+  normal internet access before shipping — see the PR description for the
+  exact list.
 - **Topic filtering was intentionally not built.** OpenAlex's topic/concept
   metadata isn't reliably populated for every work, and the brief explicitly
   said not to sacrifice core functionality for it.
@@ -240,6 +302,12 @@ wouldn't need to change. The pieces that would still need real work:
 - The 90-day retrieval window and per-request page caps are reasonable
   defaults, not tuned against real traffic volume for all 26 journals at
   once.
+- OpenAlex's `type`/`is_retracted` classification (verified current as of
+  2026-08-26) is itself imperfect — its July 2026 overhaul improved accuracy
+  to ~78% against ground truth, up from ~69%, so a small amount of
+  misclassified content may still slip through or be over-excluded. The
+  `type:article|review` allowlist plus `is_retracted:false` is the best
+  currently-available filter, not a guarantee of a perfectly clean corpus.
 
 ## Journal source mapping status
 
@@ -248,18 +316,16 @@ ISSNs cross-checked against multiple independent sources (the ISSN
 International Centre portal, publisher pages, Wikipedia) — no journal was
 dropped, and no OpenAlex Source ID was hand-typed or guessed anywhere in the
 codebase. Resolution from ISSN → OpenAlex Source ID happens **live, at
-runtime**, via OpenAlex's own `/sources?filter=issn:...` endpoint (see
-`src/lib/openalex/sources.ts`), and any journal OpenAlex doesn't return a
-match for is surfaced directly in the "Manage journals" dialog rather than
-silently dropped or faked.
+runtime**, via OpenAlex's own `/sources?filter=issn:...` endpoint, cached
+independently per journal for 24h (see `src/lib/openalex/sources.ts`), and
+any journal OpenAlex doesn't return a match for is surfaced directly in the
+"Manage journals" dialog rather than silently dropped or faked.
 
-Because this build session's network policy blocked outbound requests to
-OpenAlex entirely, **that live resolution step could not itself be executed
-during development** — it's untested against the real API, though it's a
-straightforward, documented OpenAlex query. Confirming it end-to-end (and
-noting here if any specific journal genuinely fails to resolve against
-live OpenAlex data) is the first thing worth doing once this runs somewhere
-with normal internet access.
+As noted above, this live resolution step has not yet been exercised against
+the real API in either build session due to sandbox network restrictions —
+confirming it end-to-end (and noting here if any specific journal genuinely
+fails to resolve against live OpenAlex data) is the first thing worth doing
+once this runs somewhere with normal internet access.
 
 ## Future: deploying to Vercel
 

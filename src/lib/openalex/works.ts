@@ -6,7 +6,20 @@ const PER_PAGE = 100;
 const MAX_PAGES = 8; // caps requests at 8 even for a very active 90-day window across 26 journals
 const SOURCE_ID_CHUNK_SIZE = 40; // keeps the OR filter well under URL length limits
 const WORK_SELECT_FIELDS =
-  "id,doi,title,display_name,publication_date,authorships,primary_location,open_access,abstract_inverted_index";
+  "id,doi,title,display_name,publication_date,authorships,primary_location,open_access,abstract_inverted_index,type,is_retracted";
+
+/**
+ * Publication-quality filter, applied server-side. Verified against
+ * OpenAlex's current (2026-07-15 type-classification overhaul) documentation:
+ * `type` is a canonical field with "article", "review", "erratum",
+ * "retraction", etc. as distinct values, and `is_retracted` is a
+ * Retraction-Watch-backed boolean. This keeps genuine research articles and
+ * reviews while excluding errata, corrections, editorials, letters, and
+ * other non-research entries, plus anything flagged as retracted.
+ * `,` combines filters with AND; `|` combines values with OR within one
+ * filter (see developers.openalex.org/guides/filtering).
+ */
+const PUBLICATION_TYPE_FILTER = "type:article|review,is_retracted:false";
 
 export interface WorksFetchResult {
   articles: Article[];
@@ -46,7 +59,7 @@ export async function fetchRecentWorksForSources(
   let complete = true;
 
   for (const sourceIdChunk of chunk(sourceIds, SOURCE_ID_CHUNK_SIZE)) {
-    const filter = `primary_location.source.id:${sourceIdChunk.join("|")},from_publication_date:${fromDate}`;
+    const filter = `primary_location.source.id:${sourceIdChunk.join("|")},from_publication_date:${fromDate},${PUBLICATION_TYPE_FILTER}`;
     let cursor = "*";
     for (let page = 0; page < MAX_PAGES; page++) {
       const result = await openAlexGet<OpenAlexListResponse<OpenAlexWorkRecord>>("/works", {
