@@ -76,15 +76,21 @@ export function InfoDialog({ open, onOpenChange }: InfoDialogProps) {
 
           <Section title="Does it cost anything?">
             <p>
-              <span className="font-medium text-foreground">No.</span> OpenAlex is free to use and
-              requires no API key, no account, and no payment. Every request this app makes is
-              read-only and anonymous.
+              <span className="font-medium text-foreground">Not for you.</span> OpenAlex data is
+              free and open, and this app uses it without an API key, an account, or any payment.
+              Every request it makes is read-only and anonymous.
             </p>
             <p>
-              OpenAlex allows roughly 100,000 requests per day at up to 10 per second without a key.
-              This feed stays far under that: journal lookups are cached for 24 hours, article
-              results for 20 minutes, and requests for many journals are combined into a single call
-              rather than one call per journal.
+              OpenAlex does meter API usage as a small daily budget. Keyless access, which is what
+              this app uses, is about $0.10 of usage per day — roughly 1,000 list queries. A free
+              API key raises that tenfold, and paid plans raise it further. The ceiling on request
+              rate is 100 per second.
+            </p>
+            <p>
+              Normal use sits far below that budget. Loading a 26-journal watchlist from cold costs
+              only a handful of requests, because journal lookups are cached for 24 hours, results
+              for 20 minutes, and many journals are combined into one call rather than queried
+              separately. Revisiting within 20 minutes costs nothing at all.
             </p>
           </Section>
 
@@ -92,8 +98,8 @@ export function InfoDialog({ open, onOpenChange }: InfoDialogProps) {
             <p>When you load the page, the app:</p>
             <ol className="list-decimal space-y-1 pl-5">
               <li>
-                Matches each journal on your watchlist to its OpenAlex source record, by ISSN where
-                possible.
+                Matches each journal on your watchlist to its OpenAlex source record by ISSN, the
+                stable identifier OpenAlex recommends over title matching.
               </li>
               <li>
                 Requests works published in those journals in the last{" "}
@@ -119,15 +125,28 @@ export function InfoDialog({ open, onOpenChange }: InfoDialogProps) {
 
           <Section title="What is stored about you">
             <p>
-              There is no server and no account. Everything personal to you lives in this
-              browser&apos;s local storage and never leaves your machine: your journal watchlist,
-              which articles you have marked seen, your saved articles, when you last visited, and
-              the cached OpenAlex results.
+              There is no account and no database behind this app. Your journal watchlist, the
+              articles you have marked seen, your saved articles, when you last visited, and the
+              cached results all live in this browser&apos;s local storage. None of it is sent to
+              the STATS Lab, and the app contains no analytics, tracking scripts, or third-party
+              embeds.
             </p>
             <p>
-              Nothing is sent to the STATS Lab, and there is no analytics or tracking. Clearing your
-              browser data for this site resets the feed to a blank slate, and your history will not
-              follow you to another browser or device.
+              <span className="font-medium text-foreground">What does leave your browser:</span>{" "}
+              requests to OpenAlex. Those are the only automatic outbound calls the app makes, and
+              they necessarily show OpenAlex your IP address and which journals you follow, since
+              the journal identifiers are part of the query.
+            </p>
+            <p>
+              <span className="font-medium text-foreground">What never leaves:</span> your search
+              terms, which articles you marked seen, and your saved list. Searching and filtering
+              happen locally over articles already downloaded, so nothing you type is transmitted
+              anywhere. Opening an article is an ordinary link out to the publisher, visible to them
+              like any other visit.
+            </p>
+            <p>
+              Clearing your browser data for this site resets the feed to a blank slate, and your
+              history will not follow you to another browser or device.
             </p>
           </Section>
 
