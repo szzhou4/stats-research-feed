@@ -1,14 +1,18 @@
 /**
  * Low-level fetch wrapper for the OpenAlex REST API.
  *
- * OpenAlex (https://docs.openalex.org) is fully open and requires no API
- * key. Every call in this app is read-only and anonymous. We intentionally
- * do not send a `mailto` polite-pool parameter, since doing so would mean
- * baking a contact address into client-side requests; the app instead
- * relies on OpenAlex's generous no-key rate limits (documented as ~100k
- * requests/day, ~10/second) and keeps its own request volume small via
- * batching and per-journal caching (see `sources.ts`, `works.ts`, `feed.ts`)
- * plus in-flight request de-duplication (below).
+ * OpenAlex (https://help.openalex.org) is open and usable with no API key.
+ * Every call in this app is read-only and anonymous: no key or contact
+ * address is sent, since either would mean baking a credential into
+ * client-side requests that any visitor could read and spend.
+ *
+ * Usage is metered as a daily budget rather than a flat request cap.
+ * Keyless access — what this app uses — is ~$0.10/day, about 1,000 list
+ * queries; a free key raises it 10x. The per-second ceiling is 100. The app
+ * stays well under this via batching and per-journal caching (see
+ * `sources.ts`, `works.ts`, `feed.ts`) plus the in-flight de-duplication
+ * below. If this is ever deployed somewhere high-traffic, a keyed
+ * server-side proxy is the upgrade path, not a client-side key.
  */
 
 const OPENALEX_BASE_URL = "https://api.openalex.org";
