@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Bookmark } from "lucide-react";
 import type { Article, FeedDataStatus, FeedFilterState } from "@/lib/types";
 import { JOURNAL_CATALOG } from "@/lib/journals/catalog";
 import { getFeedArticles } from "@/lib/openalex/feed";
@@ -81,17 +82,33 @@ export function FeedPage() {
     };
   }, [allReady, watchlist.followedJournals, reloadToken]);
 
-  // If the journal currently selected in the per-journal display filter gets
-  // unfollowed, its option disappears from the dropdown — reset to "all"
-  // rather than silently filtering everything out via a now-orphaned id.
+  // In Saved mode, the journal dropdown should also offer journals behind a
+  // bookmark that's no longer followed — otherwise there'd be no way to
+  // filter Saved down to that article's journal.
+  const journalOptions = useMemo(() => {
+    if (filters.seen !== "saved") return watchlist.followedJournals;
+    const followedIds = new Set(watchlist.followedJournals.map((j) => j.id));
+    const savedJournalIds = new Set(bookmarks.bookmarkedArticles.map((a) => a.journalId));
+    const extraJournals = JOURNAL_CATALOG.filter(
+      (journal) => savedJournalIds.has(journal.id) && !followedIds.has(journal.id),
+    );
+    return [...watchlist.followedJournals, ...extraJournals].sort((a, b) => a.name.localeCompare(b.name));
+  }, [filters.seen, watchlist.followedJournals, bookmarks.bookmarkedArticles]);
+
+  // If the journal currently selected in the per-journal display filter is no
+  // longer a valid option (its dropdown entry disappeared — e.g. unfollowed
+  // and not covered by a Saved-mode exception above), reset to "all" rather
+  // than silently filtering everything out via a now-orphaned id.
   useEffect(() => {
-    if (journalFilter !== "all" && !watchlist.followedJournalIds.has(journalFilter)) {
+    if (journalFilter === "all") return;
+    const validIds = new Set(journalOptions.map((j) => j.id));
+    if (!validIds.has(journalFilter)) {
       // Resetting a now-orphaned filter selection back to "all" in response to
       // an external change (the watchlist) — same pattern as the fetch effect above.
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setJournalFilter("all");
     }
-  }, [journalFilter, watchlist.followedJournalIds]);
+  }, [journalFilter, journalOptions]);
 
   const isNewArticle = useCallback(
     (article: Article) => {
@@ -113,10 +130,12 @@ export function FeedPage() {
   );
 
   const filteredSorted = useMemo(() => {
-    let list = articles;
-    if (journalFilter !== "all") list = list.filter((a) => a.journalId === journalFilter);
+    let list: Article[] = filters.seen === "saved" ? bookmarks.bookmarkedArticles : articles;
+
     if (filters.seen === "unseen") list = list.filter((a) => !seenState.seenArticleIds.has(a.id));
     else if (filters.seen === "seen") list = list.filter((a) => seenState.seenArticleIds.has(a.id));
+
+    if (journalFilter !== "all") list = list.filter((a) => a.journalId === journalFilter);
     if (filters.openAccessOnly) list = list.filter((a) => a.isOpenAccess === true);
 
     const q = filters.search.trim().toLowerCase();
@@ -135,7 +154,7 @@ export function FeedPage() {
       const bMs = parseDateMs(b.publicationDate) ?? -Infinity;
       return filters.sort === "newest" ? bMs - aMs : aMs - bMs;
     });
-  }, [articles, journalFilter, filters, seenState.seenArticleIds]);
+  }, [articles, bookmarks.bookmarkedArticles, journalFilter, filters, seenState.seenArticleIds]);
 
   const groupedEntries = useMemo(() => {
     const buckets: Record<RecencyBucket, Article[]> = {
@@ -235,7 +254,7 @@ export function FeedPage() {
           onFiltersChange={setFilters}
           journalFilter={journalFilter}
           onJournalFilterChange={setJournalFilter}
-          followedJournals={watchlist.followedJournals}
+          journalOptions={journalOptions}
           onOpenJournalManager={() => setJournalManagerOpen(true)}
           onClearFilters={clearFilters}
           hasActiveFilters={hasActiveFilters}
@@ -243,13 +262,19 @@ export function FeedPage() {
 
         {showLoading ? (
           <LoadingState />
-        ) : feedStatus === "error" ? (
+        ) : feedStatus === "error" && filters.seen !== "saved" ? (
           <ErrorState onRetry={() => setReloadToken((t) => t + 1)} />
-        ) : watchlist.followedCount === 0 ? (
+        ) : filters.seen !== "saved" && watchlist.followedCount === 0 ? (
           <EmptyState
             title="No journals followed"
             description="Your watchlist is empty. Add journals to start seeing research in your feed."
             action={{ label: "Manage journals", onClick: () => setJournalManagerOpen(true) }}
+          />
+        ) : filters.seen === "saved" && bookmarks.bookmarkedArticles.length === 0 ? (
+          <EmptyState
+            title="No saved articles yet"
+            description="Use the bookmark button on any article to save it here — even if you later unfollow its journal."
+            icon={<Bookmark className="h-6 w-6" aria-hidden="true" />}
           />
         ) : groupedEntries.length === 0 ? (
           <EmptyState
@@ -269,9 +294,9 @@ export function FeedPage() {
                       article={article}
                       isSeen={seenState.seenArticleIds.has(article.id)}
                       isNew={isNewArticle(article)}
-                      isBookmarked={bookmarks.bookmarkedArticleIds.has(article.id)}
+                      isBookmarked={bookmarks.isBookmarked(article.id)}
                       onToggleSeen={() => seenState.toggleSeen(article.id)}
-                      onToggleBookmark={() => bookmarks.toggleBookmark(article.id)}
+                      onToggleBookmark={() => bookmarks.toggleBookmark(article)}
                       isContinueTarget={highlightedArticleId === article.id}
                     />
                   ))}

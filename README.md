@@ -250,7 +250,10 @@ device. See `src/lib/storage/localStorageAdapter.ts` and
 - Which article IDs you've marked seen (manually — see "Seen / unseen
   tracking" above)
 - Your previous-visit timestamp (used for "new since last visit")
-- Bookmarked article IDs
+- Saved/bookmarked articles — a **full snapshot** of each article (title,
+  authors, journal, date, abstract, link), not just its id, so a saved
+  article stays viewable in the **Saved** tab even if you later unfollow
+  its journal or it ages out of the 90-day feed window
 - Whether you've dismissed the first-run notice
 - Per-journal caches of OpenAlex source-ID resolutions and recent works (to
   avoid refetching data that's already fresh — see "Caching model at a
