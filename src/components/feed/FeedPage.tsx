@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Bookmark } from "lucide-react";
+import { Bookmark, Info } from "lucide-react";
 import type { Article, FeedDataStatus, FeedFilterState } from "@/lib/types";
 import { JOURNAL_CATALOG } from "@/lib/journals/catalog";
 import { getFeedArticles } from "@/lib/openalex/feed";
@@ -25,6 +25,8 @@ import { EmptyState } from "./EmptyState";
 import { ErrorState } from "./ErrorState";
 import { LoadingState } from "./LoadingState";
 import { JournalManager } from "@/components/journals/JournalManager";
+import { InfoDialog } from "@/components/info/InfoDialog";
+import { Button } from "@/components/ui/button";
 
 const DEFAULT_FILTERS: FeedFilterState = {
   seen: "all",
@@ -52,6 +54,7 @@ export function FeedPage() {
   const [reloadToken, setReloadToken] = useState(0);
 
   const [journalManagerOpen, setJournalManagerOpen] = useState(false);
+  const [infoOpen, setInfoOpen] = useState(false);
   const [filters, setFilters] = useState<FeedFilterState>(DEFAULT_FILTERS);
   const [journalFilter, setJournalFilter] = useState<string>("all");
   const [highlightedArticleId, setHighlightedArticleId] = useState<string | null>(null);
@@ -229,9 +232,20 @@ export function FeedPage() {
   return (
     <div className="min-h-screen bg-background">
       <header className="sticky top-0 z-30 border-b border-border bg-background/95 backdrop-blur">
-        <div className="mx-auto max-w-3xl px-4 py-4">
-          <h1 className="text-xl font-bold tracking-tight text-foreground">STATS Research Feed</h1>
-          <p className="text-sm text-muted-foreground">Your personalized research inbox.</p>
+        <div className="mx-auto flex max-w-3xl items-start justify-between gap-4 px-4 py-4">
+          <div>
+            <h1 className="text-xl font-bold tracking-tight text-foreground">STATS Research Feed</h1>
+            <p className="text-sm text-muted-foreground">Your personalized research inbox.</p>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setInfoOpen(true)}
+            className="shrink-0 gap-1.5 text-muted-foreground"
+          >
+            <Info className="h-3.5 w-3.5" />
+            About
+          </Button>
         </div>
       </header>
 
@@ -318,6 +332,8 @@ export function FeedPage() {
         onRestoreDefaults={watchlist.restoreDefaults}
         unresolvedJournalIds={unresolvedJournalIds}
       />
+
+      <InfoDialog open={infoOpen} onOpenChange={setInfoOpen} />
     </div>
   );
 }
